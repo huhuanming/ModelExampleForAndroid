@@ -26,3 +26,9 @@ proguard/
 # Log Files
 *.log
 
+
+Model/realm_version_check.timestamp
+
+Model/gradle/wrapper/gradle-wrapper.properties
+
+Model/app/app.iml

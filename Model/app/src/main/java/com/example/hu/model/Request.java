@@ -5,6 +5,8 @@ import com.google.gson.JsonElement;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -13,94 +15,94 @@ import java.util.Set;
 import io.realm.Realm;
 import io.realm.RealmList;
 import io.realm.RealmObject;
-import retrofit.RequestInterceptor;
 import retrofit.RestAdapter;
 
 /**
+ * version 2.0
+ *
+ * changes:
+ * 1. add reflection
+ *
+ * Updated by hu on 14/11/14
+ *
+ * version 1.0
+ *
  * Created by hu on 14/10/31.
  */
 public class Request{
 
-    final static String packageName = "com.example.hu.model.";
-
-    public Request(){
-
-    }
-
     public RestAdapter adapter(){
         return new RestAdapter.Builder()
                 .setEndpoint("http://huhuanming.github.io/images/test_data")
-                .setRequestInterceptor(new RequestInterceptor() {
-                    @Override
-                    public void intercept(RequestFacade request) {
-                        if(User.isLogin()){
-                            Realm realm = Realm.getInstance(ApplicationRunTime.getAppContext());
-                            request.addQueryParam("Authorization", realm.where(User.class).findAll().first().getAuthorization());
-                         }
-                    }
-                })
                 .build();
     }
 
-    public static Object toObject(String className, JsonElement element, Realm realm) throws InvocationTargetException, NoSuchMethodException, ClassNotFoundException, IllegalAccessException, NoSuchFieldException {
+    public static Object toObject(Class cls, JsonElement element, Realm realm){
         if (element.isJsonArray()){
             List list = new ArrayList();
             for (JsonElement jsonElement:element.getAsJsonArray()){
-                list.add(jsonToObject(className,jsonElement, realm));
+                list.add(jsonToObject(cls,jsonElement, realm));
             }
+            return list;
         }else{
-            return jsonToObject(className,element, realm);
+            return jsonToObject(cls,element, realm);
         }
-        return null;
+
     }
 
-    public static RealmObject jsonToObject(String className, JsonElement element, Realm realm) throws NoSuchFieldException, NoSuchMethodException, InvocationTargetException, IllegalAccessException, ClassNotFoundException {
-        Class cls = Class.forName(className);
-        RealmObject object = realm.createObject(cls);
-        Set<Map.Entry<String,JsonElement>> entrySet = element.getAsJsonObject().entrySet();
-        for (Map.Entry<String, JsonElement> map : entrySet){
-            String key = map.getKey();
-            Field field = cls.getDeclaredField(key);
-            String type = field.getType().toString();
-            String value = map.getValue().toString();
-            String propertyName = new StringBuilder("set").append(Character.toUpperCase(key.charAt(0))).append(key.substring(1)).toString();
-            Method methodSet = object.getClass().getDeclaredMethod(propertyName, field.getType());
+    public static RealmObject jsonToObject(Class cls, JsonElement element, Realm realm)  {
+        RealmObject object = null;
+        try {
+            object = realm.createObject(cls);
 
-            if (type.endsWith("String")){
-                methodSet.invoke(object, value);
-            }else if(type.endsWith("double")){
+            Set<Map.Entry<String,JsonElement>> entrySet = element.getAsJsonObject().entrySet();
+            for (Map.Entry<String, JsonElement> map : entrySet){
+                String key = map.getKey();
+                Field field = cls.getDeclaredField(key);
+                Type type = field.getType();
+                String typeString = type.toString();
+                JsonElement value = map.getValue();
+                String propertyName = new StringBuilder("set").append(Character.toUpperCase(key.charAt(0))).append(key.substring(1)).toString();
+                Method methodSet = object.getClass().getDeclaredMethod(propertyName, field.getType());
 
-            }else if(type.endsWith("int")){
-                int x = Integer.parseInt(value);
-                methodSet.invoke(object, x);
-            }else if(type.endsWith("RealmList")){
-                String elementClassName = key;
-                propertyName = new StringBuilder("get").append(new StringBuilder().append(Character.toUpperCase(key.charAt(0))).append(key.substring(1)).toString()).toString();
-                methodSet = object.getClass().getDeclaredMethod(propertyName);
-                RealmList list =  (RealmList)methodSet.invoke(object);
+                if (typeString.endsWith("String")){
+                    methodSet.invoke(object, value.getAsString());
+                }else if(typeString.endsWith("double")){
+                    methodSet.invoke(object,  value.getAsDouble());
+                }else if(typeString.endsWith("int")){
+                    methodSet.invoke(object,  value.getAsInt());
+                }else if(typeString.endsWith("RealmList")){
+                    ParameterizedType parameterizedType = (ParameterizedType) field.getGenericType();
+                    Type modelType = parameterizedType.getActualTypeArguments()[0];
+                    propertyName = new StringBuilder("get").append(new StringBuilder().append(Character.toUpperCase(key.charAt(0))).append(key.substring(1)).toString()).toString();
+                    methodSet = object.getClass().getDeclaredMethod(propertyName);
+                    RealmList list =  (RealmList)methodSet.invoke(object);
 
-                if (elementClassName.endsWith("s")) {
-                    elementClassName = elementClassName.substring(0, elementClassName.length()-1);
-                } else if(elementClassName.endsWith("es")){
-                    elementClassName =  elementClassName.substring(0, elementClassName.length()-2);
+                    String elementClassName = modelType.toString().substring(6);
+
+                    for (JsonElement jsonElementObject : map.getValue().getAsJsonArray()){
+                        RealmObject elementObject = jsonToObject(Class.forName(elementClassName), jsonElementObject, realm);
+                        list.add(elementObject);
+                    }
+                } else {
+                    String className = typeString.substring(6);
+                    Object elementObject = jsonToObject(Class.forName(className), value, realm);
+                    methodSet.invoke(object, elementObject);
                 }
-
-                for (JsonElement jsonElementObject : map.getValue().getAsJsonArray()){
-                    elementClassName = new StringBuilder().append(Character.toUpperCase(elementClassName.charAt(0))).append(elementClassName.substring(1)).toString();
-                    RealmObject elementObject = jsonToObject(getPackageName(elementClassName), jsonElementObject, realm);
-                    list.add(elementObject);
-                }
-            } else {
-                Object elementObject = jsonToObject(type.substring(6), map.getValue(), realm);
-                methodSet.invoke(object, elementObject);
             }
+            return object;
+        } catch (NoSuchFieldException e) {
+            e.printStackTrace();
+        } catch (NoSuchMethodException e) {
+            e.printStackTrace();
+        } catch (InvocationTargetException e) {
+            e.printStackTrace();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
+            e.printStackTrace();
         }
         return object;
     }
-
-    public static String getPackageName(String className){
-        return new StringBuilder(packageName).append(className).toString();
-    }
-
 
 }

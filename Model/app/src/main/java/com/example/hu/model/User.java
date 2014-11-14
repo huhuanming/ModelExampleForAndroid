@@ -21,6 +21,8 @@ public class User extends RealmObject{
     private RealmList<Post> posts;
 
     @Ignore
+    private String login;
+    @Ignore
     private String authorization;
 
     public static boolean isLogin(){
